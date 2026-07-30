@@ -5,6 +5,7 @@ require('dotenv').config();
 
 const { initFirebase } = require('./services/firestore');
 const registerRoutes = require('./routes/register');
+const cohortConfigRoutes = require('./routes/cohortConfig');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -51,6 +52,7 @@ app.get('/health', (req, res) => {
 });
 
 app.use('/api/register', registerRoutes);
+app.use('/api/cohort-config', cohortConfigRoutes);
 
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);

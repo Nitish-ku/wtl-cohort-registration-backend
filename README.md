@@ -22,14 +22,70 @@ service.
   referral code generation. Ported from `wtl-backend/src/routes/register.js` line-for-line
   where the logic is genuinely load-bearing; see "Deviations from `wtl-backend`" below for
   what was intentionally simplified.
+- `src/routes/cohortConfig.js` — `GET /api/cohort-config`, public and unauthenticated like
+  `/api/register`. Reads the `config/cohort` Firestore doc so Nitish can move the next
+  cohort's date (or turn a week off entirely) without a code change or redeploy. Falls back
+  to `src/lib/cohortSchedule.js`'s hardcoded weekly-recurring math if the doc is missing or
+  malformed. See "Changing the next cohort date" below.
+- `src/lib/cohortSchedule.js` — the hardcoded "next Friday 9:00 AM IST" fallback math,
+  ported verbatim from `wtl-cohort-landing-v3/src/lib/countdown.ts`'s `nextCohortStart()`,
+  used only when `config/cohort` is absent or malformed.
 - `src/services/firestore.js` — Firebase Admin init (`applicationDefault()` credential
   resolution, same pattern as `wtl-backend`), minimal: only `initFirebase`, `getDb`, `admin`.
-- `test/` — unit tests for validation, the rate limiter's key-eviction logic, and the
+- `test/` — unit tests for validation, the rate limiter's key-eviction logic, the
   duplicate-guard transaction's branches (fresh registration, genuine duplicate, orphaned
-  guard recovery, malformed guard, and a simulated concurrent-write race), using Node's
-  built-in test runner (`node:test`) against an in-memory fake Firestore, no real project
-  or emulator required.
+  guard recovery, malformed guard, and a simulated concurrent-write race), the cohort
+  fallback schedule math, and the cohort-config endpoint's Firestore-present /
+  missing-field / doc-absent / read-failure branches, using Node's built-in test runner
+  (`node:test`) against an in-memory fake Firestore, no real project or emulator required.
 - `Dockerfile` — same shape as `wtl-backend`'s, adapted (no other routes to copy).
+
+## Changing the next cohort date
+
+The next cohort's start date/time, and whether a cohort is scheduled at all that week, is
+controlled by a single Firestore document, editable directly from the Firebase Console, no
+code change or redeploy needed. `GET /api/cohort-config` (called once by the frontend on
+page load) reads this doc and falls back automatically to the hardcoded Friday-recurring
+schedule if it's ever missing or malformed, so it's always safe to leave alone if you don't
+need an override that week.
+
+**Where:** Firebase Console → project **`wiredtolaunch`** → **Firestore Database** (the
+same database `wtl-backend` and this service both already write `registrations` into) →
+collection **`config`** → document **`cohort`**.
+
+If the `config` collection or `cohort` document doesn't exist yet, create it: in Firestore
+Database, click **Start collection**, collection ID `config`, document ID `cohort`, then
+add the two fields below.
+
+**Fields:**
+
+| Field | Type | Meaning |
+|---|---|---|
+| `nextCohortStart` | **Timestamp** | The exact instant (Firestore stores this as UTC) the next/current cohort window begins. |
+| `active` | **boolean** | Whether a cohort is actually scheduled this week. Set `false` for an episode-series week with no standard cohort. |
+
+**Worked example — schedule the next cohort for Friday, August 7th 2026, 9:00 AM IST:**
+
+Firestore's Timestamp field type stores and displays in UTC, so IST times need converting
+first. IST is UTC+5:30, so subtract 5 hours 30 minutes from the IST time to get UTC:
+
+```
+Friday, August 7th 2026, 9:00 AM IST  →  Friday, August 7th 2026, 3:30 AM UTC
+```
+
+In the Firebase Console, set the `nextCohortStart` field's type to **Timestamp** and enter
+`2026-08-07T03:30:00Z` (or use the console's date/time picker set to `2026-08-07 03:30:00`
+UTC — check which timezone the picker itself is displaying before typing the time in). Set
+`active` to `true` (boolean, not the string `"true"`).
+
+**To show "no cohort scheduled" for an episode-series week:** set `active` to `false`
+(boolean). You can leave `nextCohortStart` pointing at whatever date it already has, it's
+ignored while `active` is `false`.
+
+**How fast does an edit take effect?** The endpoint sends
+`Cache-Control: public, max-age=300`, so a browser or CDN may serve a cached response for up
+to 5 minutes after you save the edit. Since the frontend only fetches this once per page
+load, a visitor who already has the page open won't see the change until they reload.
 
 ## Deviations from `wtl-backend`'s `register.js` — and why
 

@@ -1,16 +1,33 @@
 // Minimal in-memory stand-in for a Firestore Firestore() instance, just enough surface
-// (collection().doc()/.where().limit().get(), doc(path), runTransaction) to exercise
-// registerWithGuards()'s branching logic without touching a real project. Does NOT
-// simulate genuine cross-transaction optimistic-concurrency retries (real Firestore's
+// (collection().doc()/.where().limit().get(), doc(path).get(), runTransaction) to exercise
+// registerWithGuards()'s and cohortConfig's route logic without touching a real project. Does
+// NOT simulate genuine cross-transaction optimistic-concurrency retries (real Firestore's
 // SDK re-runs the whole callback on a conflicting write) — the ALREADY_EXISTS-race test
 // below instead simulates the *outcome* of such a race directly (store already holds the
 // doc a concurrent transaction would have created), which is enough to exercise
 // registerWithGuards()'s own catch-and-treat-as-duplicate handling.
 
 class DocRef {
-  constructor(path) {
+  // `store` is optional and, when passed, is the live FakeFirestore instance's own store object
+  // (not a copy), so a plain non-transactional `.get()` below always reflects whatever the test
+  // has since written into `db.store`. Existing callers that never pass `store` (or never call
+  // `.get()`) are unaffected; this is purely additive for cohortConfig.test.js, which reads a
+  // single config doc outside of any transaction.
+  constructor(path, store) {
     this.path = path;
     this.id = path.split('/').pop();
+    this._store = store;
+  }
+
+  async get() {
+    const data = this._store ? this._store[this.path] : undefined;
+    return {
+      exists: !!data,
+      id: this.id,
+      ref: this,
+      data: () => data,
+      get: (field) => (data ? data[field] : undefined),
+    };
   }
 }
 
@@ -21,7 +38,7 @@ class FakeFirestore {
   }
 
   doc(path) {
-    return new DocRef(path);
+    return new DocRef(path, this.store);
   }
 
   collection(name) {
@@ -29,7 +46,7 @@ class FakeFirestore {
     return {
       doc(id) {
         const docId = id || `auto${++self._counter}`;
-        return new DocRef(`${name}/${docId}`);
+        return new DocRef(`${name}/${docId}`, self.store);
       },
       where(field, _op, value) {
         return {

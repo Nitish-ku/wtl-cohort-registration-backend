@@ -23,7 +23,7 @@ app.set('trust proxy', 1);
 // Do NOT add wiredtolaunch.in or any of the existing .live cohort domains here — those are
 // served by the separate wtl-backend service, not this one.
 const ALLOWED_ORIGINS = [
-  'https://REPLACE_WITH_REAL_COHORT_V3_DEPLOY_DOMAIN.invalid',
+  'https://wtl-cohort-landing-v3.vercel.app',
   ...(process.env.NODE_ENV !== 'production' ? ['http://localhost:3000', 'http://localhost:5173'] : []),
 ];
 
